@@ -1546,6 +1546,72 @@ class test_ConnectionStep:
         assert c.connection is fake_conn
 
 
+    # ------------------------------------------------------------------
+    # info() - sanitizes credentials from broker info / alternates
+    # ------------------------------------------------------------------
+
+    def test_info_sanitizes_alternates(self):
+        """info() masks credentials embedded in alternate broker URLs."""
+        step, c = self._get_step_and_consumer()
+        c.connection = Mock(name='conn')
+        c.connection.info.return_value = {
+            'hostname': '127.0.0.1',
+            'userid': None,
+            'virtual_host': '0',
+            'port': 6379,
+            'transport': 'redis',
+            'alternates': [
+                'redis://:mainpass@127.0.0.1:6379/0',
+                'redis://:altpass@127.0.0.1:6380/0',
+            ],
+        }
+
+        params = step.info(c)['broker']
+
+        assert 'mainpass' not in str(params['alternates'])
+        assert 'altpass' not in str(params['alternates'])
+        assert 'redis://:**@127.0.0.1:6379/0' in params['alternates']
+        assert 'redis://:**@127.0.0.1:6380/0' in params['alternates']
+
+    def test_info_strips_top_level_password(self):
+        """info() removes the top-level broker password field."""
+        step, c = self._get_step_and_consumer()
+        c.connection = Mock(name='conn')
+        c.connection.info.return_value = {
+            'hostname': '127.0.0.1',
+            'userid': 'guest',
+            'password': 'secretpass',
+            'virtual_host': '/',
+            'transport': 'amqp',
+        }
+
+        params = step.info(c)['broker']
+
+        assert 'password' not in params
+
+    def test_info_handles_missing_alternates(self):
+        """info() does not crash when connection info has no alternates."""
+        step, c = self._get_step_and_consumer()
+        c.connection = Mock(name='conn')
+        c.connection.info.return_value = {
+            'hostname': '127.0.0.1',
+            'userid': 'guest',
+            'virtual_host': '/',
+            'transport': 'amqp',
+        }
+
+        params = step.info(c)['broker']
+
+        assert 'alternates' not in params
+
+    def test_info_without_connection_returns_na(self):
+        """info() returns 'N/A' when there is no active connection."""
+        step, c = self._get_step_and_consumer()
+        c.connection = None
+
+        assert step.info(c) == {'broker': 'N/A'}
+
+
 class test_Gossip:
 
     def test_init(self):
